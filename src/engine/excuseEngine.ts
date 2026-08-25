@@ -62,7 +62,7 @@ const PATTERNS: Pattern[] = [
   {
     category: 'time',
     regex:
-      /\b(no time|not enough time|too busy|so busy|swamped|slammed|don'?t have time|running out of time)\b/i,
+      /\b(no time|not enough time|too busy|so busy|really busy|pretty busy|super busy|just busy|swamped|slammed|don'?t have time|running out of time)\b/i,
   },
 ]
 
@@ -73,7 +73,7 @@ const RESPONSES: Record<Category, string[]> = {
     "Welcome. Drop your best excuse on me — I've heard them all, and I'm still not buying it.",
   ],
   help: [
-    "Simple: tell me what you're avoiding and why. I'll poke holes in the 'why', then push you toward one small next step. When you commit, say something like \"I'll do it by 6pm\" and I'll log it. Come back and mark it done for a win.",
+    "Simple: tell me what you're avoiding. I'll poke holes in the excuse and keep asking why until we hit the real reason — then push you toward one small next step. When you commit, say something like \"I'll do it by 6pm\" and I'll log it. Come back and mark it done for a win.",
   ],
   affirmative: [
     "That's what I like to hear. Go do the thing — I'll be right here when you're back.",
@@ -126,7 +126,56 @@ const RESPONSES: Record<Category, string[]> = {
   ],
 }
 
-const FOLLOWUPS: Partial<Record<Category, string[]>> = {
+// Tier 0: the first time this category comes up — dig into the root of the resistance
+// instead of jumping straight to action. "Why aren't you actually doing this?"
+const WHY_QUESTIONS: Partial<Record<Category, string[]>> = {
+  time: [
+    'If this actually mattered as much as you say, would you really have "no time"? What is it competing with?',
+    "What are you protecting your time for instead — and why does that feel safer than this?",
+  ],
+  procrastination: [
+    'What is it about "later" that feels easier than "now"? What are you avoiding by pushing this off?',
+    "If you're honest, what's the real reason you keep moving this to tomorrow?",
+  ],
+  tired: [
+    "Is this actually about energy, or is there something about the task itself you're dreading?",
+    'What would you suddenly have energy for right now if it wasn\'t this? Be honest about what that tells you.',
+  ],
+  motivation: [
+    "Motivation aside — what is it about this specific task that you're resisting?",
+    'If you strip away "I don\'t feel like it," what\'s underneath? Boredom? Fear of doing it wrong? Something else?',
+  ],
+  difficulty: [
+    "Is it really too hard, or are you afraid of finding out it's harder than you hoped?",
+    'What part of "not knowing how" is actually "not wanting to find out"?',
+  ],
+  fear: [
+    'What is the actual worst-case outcome here, specifically? Say it, in detail.',
+    'What does doing this badly say about you, in your head? Is that story even true?',
+  ],
+  external: [
+    'Which parts of this are genuinely out of your hands, and which parts are you hiding behind?',
+    'If the other person or situation weren\'t a factor at all, would you actually be doing this right now?',
+  ],
+  health: ["Is this the actual reason today, or has it quietly become the reason you reach for by default?"],
+  generic: [
+    "What's the real reason underneath the reason you just gave me?",
+    'If you had to guess, what are you actually avoiding by not doing this?',
+  ],
+}
+
+// Tier 1: they've stayed in excuse-mode after being asked why — push past the first,
+// easy answer toward what's really going on.
+const DIG_DEEPER_QUESTIONS: string[] = [
+  "That's the surface answer. What's underneath that?",
+  "Notice you've now given me a reason instead of a start. What's the actual block?",
+  'If none of your usual excuses existed, would you still not be doing this? What would be left?',
+  'What are you actually afraid would happen if you just did it right now, badly?',
+  "What's this excuse protecting you from feeling?",
+]
+
+// Tier 2+: enough introspection — stop analyzing, force one tiny concrete action.
+const ACTION_FOLLOWUPS: Partial<Record<Category, string[]>> = {
   time: [
     'What time today can you protect, even 5 minutes, for this?',
     "Name the smallest version of this you could finish before tonight.",
@@ -137,8 +186,11 @@ const FOLLOWUPS: Partial<Record<Category, string[]>> = {
   difficulty: ['What is step one — the boring, tiny, obvious first move?'],
   fear: ['What would the worst-but-finished version of this look like?'],
   external: ['What is the one piece of this that is fully in your control?'],
+  health: ['What is the smallest check-in you can do once you\'re actually up for it?'],
   generic: ['What is one small, concrete step you will take today?'],
 }
+
+const NON_EXCUSE_CATEGORIES: Category[] = ['greeting', 'help', 'affirmative']
 
 const recentByCategory = new Map<Category, string>()
 
@@ -160,17 +212,36 @@ export interface BustResult {
   followUp?: string
 }
 
-export function bustExcuse(text: string): BustResult {
+/**
+ * excuseStreak: how many excuses in a row (since the last commitment/affirmative)
+ * the user has offered. Buster starts by asking why, keeps digging if the excuses
+ * keep coming, then forces a tiny concrete action once the digging's played out.
+ */
+export function bustExcuse(text: string, excuseStreak = 0): BustResult {
   const category = detectCategory(text)
   const pool = RESPONSES[category]
   const last = recentByCategory.get(category)
   const reply = pick(pool, last)
   recentByCategory.set(category, reply)
 
-  const followUpPool = FOLLOWUPS[category]
-  const followUp = followUpPool && category !== 'greeting' && category !== 'help' && category !== 'affirmative'
-    ? pick(followUpPool)
-    : undefined
+  if (NON_EXCUSE_CATEGORIES.includes(category)) {
+    return { category, reply }
+  }
+
+  let followUp: string
+  if (excuseStreak <= 0) {
+    followUp = pick(WHY_QUESTIONS[category] ?? WHY_QUESTIONS.generic!)
+  } else if (excuseStreak === 1) {
+    followUp = pick(DIG_DEEPER_QUESTIONS)
+  } else {
+    const action = pick(ACTION_FOLLOWUPS[category] ?? ACTION_FOLLOWUPS.generic!)
+    followUp =
+      excuseStreak === 2
+        ? `We've been circling this instead of moving. Enough digging — ${
+            action.charAt(0).toLowerCase() + action.slice(1)
+          }`
+        : action
+  }
 
   return { category, reply, followUp }
 }

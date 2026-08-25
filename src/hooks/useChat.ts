@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { bustExcuse, tryParseCommitment } from '../engine/excuseEngine'
 import type { ChatMessage, Commitment, Stats } from '../types'
 
@@ -10,7 +10,7 @@ const INTRO: ChatMessage = {
   id: 'intro',
   role: 'buddy',
   text:
-    "Hey, I'm Buster — your excuse-busting buddy. Tell me what you keep putting off, and why you haven't done it yet. I'll call it out and push you toward a first step. Say something like \"I'll write the report by 5pm\" and I'll hold you to it.",
+    "Hey, I'm Buster — your excuse-busting buddy. Tell me what you keep putting off. I'll call out the excuse and keep asking why until we hit the real reason — then push you toward a first step. Say something like \"I'll write the report by 5pm\" and I'll hold you to it.",
   ts: Date.now(),
 }
 
@@ -34,6 +34,10 @@ export function useChat() {
     load(STATS_KEY, { excusesBusted: 0, commitmentsKept: 0, streak: 0 }),
   )
   const [isTyping, setIsTyping] = useState(false)
+  // How many excuses in a row (since the last commitment or "ok, I'll do it")
+  // the user has offered. Drives how hard Buster digs into "why" before
+  // switching to forcing a concrete action. Doesn't need to survive a reload.
+  const excuseStreakRef = useRef(0)
 
   useEffect(() => {
     localStorage.setItem(MESSAGES_KEY, JSON.stringify(messages))
@@ -65,6 +69,7 @@ export function useChat() {
         setIsTyping(false)
 
         if (commitment) {
+          excuseStreakRef.current = 0
           const entry: Commitment = {
             id: uid(),
             task: commitment.task,
@@ -84,8 +89,11 @@ export function useChat() {
           return
         }
 
-        const { reply, followUp, category } = bustExcuse(text)
-        if (category !== 'greeting' && category !== 'help') {
+        const { reply, followUp, category } = bustExcuse(text, excuseStreakRef.current)
+        if (category === 'affirmative') {
+          excuseStreakRef.current = 0
+        } else if (category !== 'greeting' && category !== 'help') {
+          excuseStreakRef.current += 1
           setStats((prev) => ({ ...prev, excusesBusted: prev.excusesBusted + 1 }))
         }
         const full = followUp ? `${reply}\n\n${followUp}` : reply
@@ -113,6 +121,7 @@ export function useChat() {
     setMessages([INTRO])
     setCommitments([])
     setStats({ excusesBusted: 0, commitmentsKept: 0, streak: 0 })
+    excuseStreakRef.current = 0
   }, [])
 
   return {
